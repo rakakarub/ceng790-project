@@ -1,7 +1,6 @@
 package edu.metu.ceng790.project
 
 import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.SparkSession
 
 object test {
   def main(args: Array[String]): Unit = {

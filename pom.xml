@@ -55,6 +55,30 @@
       <version>2.2.0</version>
     </dependency>
 
+    <dependency>
+      <groupId>org.vegas-viz</groupId>
+      <artifactId>vegas_2.11</artifactId>
+      <version>0.3.11</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.vegas-viz</groupId>
+      <artifactId>vegas-spark_2.11</artifactId>
+      <version>0.3.11</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.vegas-viz</groupId>
+      <artifactId>vegas-macros_2.11</artifactId>
+      <version>0.3.11</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.vegas-viz</groupId>
+      <artifactId>vegas-flink_2.11</artifactId>
+      <version>0.3.11</version>
+    </dependency>
+
   </dependencies>
 
   <build>
