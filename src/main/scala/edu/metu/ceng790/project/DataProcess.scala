@@ -7,6 +7,7 @@ import org.apache.spark.sql.functions._
 
 object DataProcess {
 
+  val FINAL_DATASET_DIR = "finalDataSets/"
   val DATASET_HOME_DIR = "cleanDataSet/home-credit-default-risk/"
   val TRAIN_DIR = DATASET_HOME_DIR + "application_train.csv"
   val TEST_DIR = DATASET_HOME_DIR + "application_test.csv"
@@ -16,6 +17,9 @@ object DataProcess {
   val INSTALLMENTS_PAYMENTS_DIR = DATASET_HOME_DIR + "installments_payments.csv"
   val POS_CASH_BALANCE_DIR = DATASET_HOME_DIR + "POS_CASH_balance.csv"
   val PREVIOUS_APPLICATION_DIR = DATASET_HOME_DIR + "previous_application.csv"
+  val COMBINED_DATASET_DIR = FINAL_DATASET_DIR + "combinedDataSet.csv"
+  val FINAL_TRAIN_DIR = FINAL_DATASET_DIR + "finalTrain.csv"
+  val FINAL_TEST_DIR = FINAL_DATASET_DIR + "finalTest.csv"
 
   val AGGREGATE_MAPPING: Map[String, Column => Column] = Map(
     "MIN" -> min,
@@ -30,16 +34,88 @@ object DataProcess {
 
   def main(args: Array[String]): Unit = {
 
-    val spark = SparkSession.builder.appName("Ceng-790 Big Data Project").config("spark.master", "local[*]").getOrCreate()
+    val spark = SparkSession.builder.appName("Ceng-790 Big Data Project")
+      .config("spark.master", "local[*]")
+      .config("spark.driver.memory", "4g")
+      .config("spark.executor.memory", "4g")
+      .getOrCreate()
+
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
 
-    val ds = prevAppNormalize(PREVIOUS_APPLICATION_DIR, spark)
-    ds.printSchema()
-    println("Size : " + ds.count())
-    ds.show(10)
+    //combineDataSets
+//  comineDataSet(spark)
+//
+
+    val combinedDataSet = loadFile(COMBINED_DATASET_DIR, spark)
+
+    //Extract train data
+    val trainDF : DataFrame = combinedDataSet.where(col("label").=!=(-23))
+
+    //Extract test data
+    val testDF : DataFrame = combinedDataSet.where(col("label").===(-23)).drop("label")
+
+    println("Total rows : " + combinedDataSet.count())
+    println("Total columns : " + combinedDataSet.columns.size)
+
+    println("Train rows : " + trainDF.count())
+    println("Train columns : " + trainDF.columns.size)
+
+    println("Test rows : " + testDF.count())
+    println("Test columns : " + testDF.columns.size)
+
+    trainDF.coalesce(1).write
+      .format("csv")
+      .option("header", "true")
+      .save(FINAL_DATASET_DIR + "finalTrain.csv")
+
+    testDF.coalesce(1).write
+      .format("csv")
+      .option("header", "true")
+      .save(FINAL_DATASET_DIR + "finalTest.csv")
+//    val oneHotDFTrain = convertCategoricalToOneHotEncoded(trainDF)
+//    val finalTrainDF = prepareForTraining(oneHotDFTrain)
+//
+//    val oneHotDFTest = convertCategoricalToOneHotEncoded(testDF)
+//    val finalTestDF = prepareForTraining(oneHotDFTest)
 
 
+  }
+
+  def comineDataSet(spark: SparkSession) : Unit = {
+    //Load test/train data
+    val trainDF = loadFile(TRAIN_DIR, spark)
+    val testDF = loadFile(TEST_DIR, spark)
+
+    //Union train and test data
+    val unionDF = trainDF.union(testDF)
+
+    //prepare/normalize the tables
+    val prevApplicationDF = prevAppNormalize(PREVIOUS_APPLICATION_DIR, spark)
+    val posCashDF = posCashNormalize(POS_CASH_BALANCE_DIR, spark)
+    val installmentsDF = installmentPaymentsNormalize(INSTALLMENTS_PAYMENTS_DIR, spark)
+    val creditCardDF = creditCardDataNormalize(CREDIT_CARD_BALANCE_DIR, spark)
+    val bureauDF = bureauBalanceNormalize(spark)
+
+
+    //Combine all tables into one
+    val combinedDataSet = List(
+      unionDF,
+      prevApplicationDF,
+      posCashDF,
+      installmentsDF,
+      creditCardDF,
+      bureauDF
+    )
+      .reduce(
+        (a : DataFrame, b : DataFrame) =>
+          a.join(b, Seq("SK_ID_CURR"), "left")
+      )
+
+    combinedDataSet.coalesce(1).write
+      .format("csv")
+      .option("header", "true")
+      .save(FINAL_DATASET_DIR + "combinedDataSet.csv")
   }
   // Get only the features of the dataSet in to one column, to be able to train a model
   def prepareForTraining(dataFrame : DataFrame): DataFrame = {
@@ -58,6 +134,8 @@ object DataProcess {
       .dtypes
       .filter(e => e._2.startsWith("String"))
       .map(f => f._1)
+
+    println("String Indexer Size : " + categoricalColumns.size)
 
     //Create StringIndexer
     val columnStringIndexer = categoricalColumns.map({
