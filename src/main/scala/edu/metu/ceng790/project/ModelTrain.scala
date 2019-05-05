@@ -1,8 +1,12 @@
 package edu.metu.ceng790.project
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import DataProcess._
+import org.apache.spark.ml.evaluation.RegressionEvaluator
 import org.apache.spark.ml.tuning.{CrossValidator, CrossValidatorModel, ParamGridBuilder}
+import org.apache.spark.sql.functions.{col, udf, when}
+import org.apache.spark.ml.linalg.Vector
+import org.apache.spark.ml.regression.GBTRegressor
 
 object ModelTrain {
 
@@ -10,22 +14,31 @@ object ModelTrain {
 
     val spark = SparkSession.builder.appName("Ceng-790 Big Data Project")
       .config("spark.master", "local[*]")
-      .config("spark.driver.memory", "4g")
-      .config("spark.executor.memory", "4g")
+      .config("spark.driver.memory", "4700m")
+      .config("spark.executor.memory", "4700m")
       .getOrCreate()
 
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
 
-//    val trainDF = loadFile(FINAL_TRAIN_DIR, spark).na.fill(0).repartition(100)
-    val testDF = loadFile(FINAL_TEST_DIR, spark).na.fill(0)
-//
+//    val trainDF = spark.read.parquet(FINAL_TRAIN_DIR_FINAL)
+    val testDF = spark.read.parquet(FINAL_TEST_DIR_FINAL)
+
+//    println("TRAIN COLUMN SIZE : " + trainDF.columns.size)
+    println("TEST COLUMN SIZE : " + testDF.columns.size)
+
 //    val oneHotDFTrain = convertCategoricalToOneHotEncoded(trainDF)
-//    val finalTrainDF = prepareForTraining(oneHotDFTrain).cache()
-//
-    val oneHotDFTest = convertCategoricalToOneHotEncoded(testDF)
-    val finalTestDF = prepareForTraining(oneHotDFTest).cache()
-//
+//    val finalTrainDF = prepareForTraining(trainDF)
+//      .select("SK_ID_CURR", "FEATURES", "label").cache()
+
+//    finalTrainDF.printSchema()
+//    finalTrainDF.orderBy("SK_ID_CURR").show(25)
+
+//    val oneHotDFTest = convertCategoricalToOneHotEncoded(testDF)
+    val finalTestDF = prepareForTraining(testDF)
+      .select("SK_ID_CURR", "FEATURES")
+      .cache()
+
 //    //Initialize model
 //    val gbt = new GBTRegressor()
 //      .setLabelCol("label")
@@ -43,43 +56,25 @@ object ModelTrain {
 //      .setNumFolds(3)
 //
 //    val model = crossValidation.fit(finalTrainDF)
-//    model.save(FINAL_DATASET_DIR + "gbtModel2")
+//    model.save(FINAL_DATASET_DIR + "gbtModelFinal")
 
-    val model = CrossValidatorModel.load(FINAL_DATASET_DIR + "gbtModel2")
+    val modelLoaded = CrossValidatorModel.load(FINAL_DATASET_DIR + "gbtModelFinal")
 
-    val prediction = model.bestModel.transform(finalTestDF)
-    prediction.printSchema()
+    val prediction = modelLoaded.bestModel.transform(finalTestDF)
+    prediction.show(truncate = false)
+    val normalized = prediction
+      .withColumn("prediction", when(prediction("prediction") < 0, 0).otherwise(prediction("prediction")))
 
-    import org.apache.spark.sql.functions.{udf, col}
-    import org.apache.spark.ml.linalg.Vector
-    val second = udf((v : Vector) => v.toArray(1))
+    normalized.select(
+      col("SK_ID_CURR"),
+      col("prediction").alias("TARGET")
+    )
+      .orderBy("SK_ID_CURR")
+      .coalesce(1)
+      .write.mode("overwrite")
+      .option("header", "true")
+      .csv(FINAL_DATASET_DIR + "submission")
 
-//    val result = prediction
-//      .select(col("SK_ID_CURR"),
-//        second(col("prediction")).alias("TARGET"))
-//      .orderBy("SK_ID_CURR")
-//        .coalesce(1)
-//        .write
-//        .format("csv")
-//        .option("header", "true")
-//        .save(FINAL_DATASET_DIR + "results.csv")
-
-    val columnNames = Seq("SK_ID_CURR", "prediction")
-    val result = prediction.select("SK_ID_CURR", "prediction").toDF().cache()
-    println("Size : " + result.count())
-
-    val orderedDF = result.orderBy(col("SK_ID_CURR").asc).cache()
-    println("Sizee: " + orderedDF.count())
-//      .orderBy("SK_ID_CURR")
-//      .show(5)
-//      .coalesce(1)
-//      .write
-//      .format("csv")
-//      .option("header", "true")
-//      .save(FINAL_DATASET_DIR + "results.csv")
-
-
-
-  }
+      }
 
 }
