@@ -18,8 +18,13 @@ object DataProcess {
   val POS_CASH_BALANCE_DIR = DATASET_HOME_DIR + "POS_CASH_balance.csv"
   val PREVIOUS_APPLICATION_DIR = DATASET_HOME_DIR + "previous_application.csv"
   val COMBINED_DATASET_DIR = FINAL_DATASET_DIR + "combinedDataSet.csv"
+  val COMBINED_DATASET_DIR_NEW = FINAL_DATASET_DIR + "combinedDataSetNEW1.csv"
   val FINAL_TRAIN_DIR = FINAL_DATASET_DIR + "finalTrain.csv"
   val FINAL_TEST_DIR = FINAL_DATASET_DIR + "finalTest.csv"
+  val FINAL_TEST_DIR_NEW = FINAL_DATASET_DIR + "finalTestNEW.csv"
+  val FINAL_TRAIN_DIR_NEW = FINAL_DATASET_DIR + "finalTrainNEW.csv"
+  val FINAL_TRAIN_DIR_FINAL = FINAL_DATASET_DIR + "finalTrainFINAL"
+  val FINAL_TEST_DIR_FINAL = FINAL_DATASET_DIR + "finalTestFINAL";
 
   val AGGREGATE_MAPPING: Map[String, Column => Column] = Map(
     "MIN" -> min,
@@ -47,16 +52,17 @@ object DataProcess {
 //  comineDataSet(spark)
 //
 
-    val combinedDataSet = loadFile(COMBINED_DATASET_DIR, spark)
+    val combinedDataSet = loadFile(COMBINED_DATASET_DIR_NEW, spark).cache()
+    val finalCombinedDF = convertCategoricalToOneHotEncoded(combinedDataSet).cache()
 
     //Extract train data
-    val trainDF : DataFrame = combinedDataSet.where(col("label").=!=(-23))
+    val trainDF : DataFrame = finalCombinedDF.where(col("label").=!=(-23))
 
     //Extract test data
-    val testDF : DataFrame = combinedDataSet.where(col("label").===(-23)).drop("label")
+    val testDF : DataFrame = finalCombinedDF.where(col("label").===(-23)).drop("label")
 
-    println("Total rows : " + combinedDataSet.count())
-    println("Total columns : " + combinedDataSet.columns.size)
+    println("Total rows : " + finalCombinedDF.count())
+    println("Total columns : " + finalCombinedDF.columns.size)
 
     println("Train rows : " + trainDF.count())
     println("Train columns : " + trainDF.columns.size)
@@ -64,15 +70,15 @@ object DataProcess {
     println("Test rows : " + testDF.count())
     println("Test columns : " + testDF.columns.size)
 
-    trainDF.coalesce(1).write
-      .format("csv")
-      .option("header", "true")
-      .save(FINAL_DATASET_DIR + "finalTrain.csv")
+    trainDF
+      .write
+        .mode("overwrite")
+      .parquet(FINAL_DATASET_DIR + "finalTrainFINAL")
 
-    testDF.coalesce(1).write
-      .format("csv")
-      .option("header", "true")
-      .save(FINAL_DATASET_DIR + "finalTest.csv")
+    testDF
+      .write
+        .mode("overwrite")
+      .parquet(FINAL_DATASET_DIR + "finalTestFINAL")
 //    val oneHotDFTrain = convertCategoricalToOneHotEncoded(trainDF)
 //    val finalTrainDF = prepareForTraining(oneHotDFTrain)
 //
@@ -89,6 +95,18 @@ object DataProcess {
 
     //Union train and test data
     val unionDF = trainDF.union(testDF)
+    val engineeredUnionDF = unionDF
+      .withColumn("DAYS_EMPLOYED", when(col("DAYS_EMPLOYED") > 0, lit(null)).otherwise(col("DAYS_EMPLOYED")))
+      .withColumn("NEW_CREDIT_TO_ANNUITY_RATIO", col("AMT_CREDIT") / col("AMT_ANNUITY"))
+      .withColumn("NEW_CREDIT_TO_GOODS_RATIO", col("AMT_CREDIT") / col("AMT_GOODS_PRICE"))
+      .withColumn("NEW_INC_PER_CHILD", col("AMT_INCOME_TOTAL") / (lit(1) + col("CNT_CHILDREN")))
+      .withColumn("NEW_EMPLOY_TO_BIRTH_RATIO", col("DAYS_EMPLOYED") / col("DAYS_BIRTH"))
+      .withColumn("NEW_ANNUITY_TO_INCOME_RATIO", col("AMT_ANNUITY") / (lit(1) + col("AMT_INCOME_TOTAL")))
+      .withColumn("NEW_CAR_TO_BIRTH_RATIO", col("OWN_CAR_AGE") / col("DAYS_BIRTH"))
+      .withColumn("NEW_CAR_TO_EMPLOY_RATIO", col("OWN_CAR_AGE") / col("DAYS_EMPLOYED"))
+      .withColumn("NEW_PHONE_TO_BIRTH_RATIO", col("DAYS_LAST_PHONE_CHANGE") / col("DAYS_BIRTH"))
+      .withColumn("NEW_PHONE_TO_BIRTH_RATIO_EMPLOYER", col("DAYS_LAST_PHONE_CHANGE") / col("DAYS_EMPLOYED"))
+      .withColumn("NEW_CREDIT_TO_INCOME_RATIO", col("AMT_CREDIT") / col("AMT_INCOME_TOTAL"))
 
     //prepare/normalize the tables
     val prevApplicationDF = prevAppNormalize(PREVIOUS_APPLICATION_DIR, spark)
@@ -100,7 +118,7 @@ object DataProcess {
 
     //Combine all tables into one
     val combinedDataSet = List(
-      unionDF,
+      engineeredUnionDF,
       prevApplicationDF,
       posCashDF,
       installmentsDF,
@@ -115,12 +133,13 @@ object DataProcess {
     combinedDataSet.coalesce(1).write
       .format("csv")
       .option("header", "true")
-      .save(FINAL_DATASET_DIR + "combinedDataSet.csv")
+      .save(FINAL_DATASET_DIR + "combinedDataSetFinal.csv")
   }
   // Get only the features of the dataSet in to one column, to be able to train a model
   def prepareForTraining(dataFrame : DataFrame): DataFrame = {
+    val removedColumns = Array("label", "SK_ID_CURR")
     val newDataFrame = new VectorAssembler()
-      .setInputCols(dataFrame.columns.filterNot(e => e == "label").filterNot(f => f == "SK_ID_CURR"))
+      .setInputCols(dataFrame.columns.filter(e => !removedColumns.contains(e)))
       .setOutputCol("FEATURES")
       .transform(dataFrame)
 

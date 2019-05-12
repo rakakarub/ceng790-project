@@ -3,6 +3,7 @@ package edu.metu.ceng790.project
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.{sql}
 import org.apache.spark.sql.functions._
+import DataProcess._
 
 object dataCleaner {
 
@@ -22,7 +23,11 @@ object dataCleaner {
 
   def main(args: Array[String]): Unit = {
 
-    val spark = SparkSession.builder.appName("Ceng-790 Big Data Project").config("spark.master", "local[*]").getOrCreate()
+    val spark = SparkSession.builder.appName("Ceng-790 Big Data Project")
+      .config("spark.master", "local[*]")
+      .config("spark.driver.memory", "4g")
+      .config("spark.executor.memory", "4g")
+      .getOrCreate()
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
 
@@ -38,10 +43,10 @@ object dataCleaner {
 
   def cleanDataSet(dataSetDirectory : String, sparkSession: SparkSession, dataType : Int): Unit = {
 
-    var ds = loadDataset(dataSetDirectory, sparkSession)
-    ds.printSchema()
+    println("Cleaning started : " + dataSetDirectory)
 
-    ds.show(5)
+    var ds = loadDataset(dataSetDirectory, sparkSession)
+
     if(dataType == TRAIN_DATA) {
       ds = ds.withColumnRenamed("TARGET", "label")
       val columns = ds
@@ -64,7 +69,7 @@ object dataCleaner {
 
     val missingInfos = missingValueInfo(ds)
 
-    val dsNoMiss = ds.na.drop()
+//    val dsNoMiss = ds.na.drop()
 
     val numericalMissingColumns = missingInfos
       .filter(e => numericalFeatures.contains(e._1))
@@ -81,19 +86,18 @@ object dataCleaner {
     }).toMap
 
     val categoricalColumnsAndMosts : Map[String, String] = categoricalFeatures.map(f => {
-      val mode : String = dsNoMiss.groupBy(f).count().sort(col("count").desc).collect()(0)(0).toString
+      val mode : String = ds.groupBy(f).count().sort(col("count").desc).collect()(0)(0).toString
       ds = ds.na.fill(mode, Seq(f))
       (f, mode)
     }).toMap
 
 
-//    ds = ds.withColumn("WEIGHT", weightBalance(col("label")))
-
     ds.coalesce(1).write
       .format("csv")
       .option("header", "true")
-      .save("result/" + dataSetDirectory)
+      .save("cleanDataSet/home-credit-default-risk-2/" + dataSetDirectory)
 
+    println("Cleaning finished : " + dataSetDirectory)
   }
 
   def dropColumns(inputDF: DataFrame, dropList: List[String]): DataFrame =

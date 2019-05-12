@@ -1,10 +1,12 @@
 package edu.metu.ceng790.project
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import DataProcess._
 import org.apache.spark.ml.evaluation.RegressionEvaluator
+import org.apache.spark.ml.tuning.{CrossValidator, CrossValidatorModel, ParamGridBuilder}
+import org.apache.spark.sql.functions.{col, udf, when}
+import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.regression.GBTRegressor
-import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 
 object ModelTrain {
 
@@ -12,45 +14,67 @@ object ModelTrain {
 
     val spark = SparkSession.builder.appName("Ceng-790 Big Data Project")
       .config("spark.master", "local[*]")
-      .config("spark.driver.memory", "4g")
-      .config("spark.executor.memory", "4g")
+      .config("spark.driver.memory", "4700m")
+      .config("spark.executor.memory", "4700m")
       .getOrCreate()
 
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
 
-    val trainDF = loadFile(FINAL_TRAIN_DIR, spark).na.fill(0).repartition(100)
-    val testDF = loadFile(FINAL_TEST_DIR, spark).na.fill(0).repartition(100)
+//    val trainDF = spark.read.parquet(FINAL_TRAIN_DIR_FINAL)
+    val testDF = spark.read.parquet(FINAL_TEST_DIR_FINAL)
 
-    val oneHotDFTrain = convertCategoricalToOneHotEncoded(trainDF)
-    val finalTrainDF = prepareForTraining(oneHotDFTrain).cache()
+//    println("TRAIN COLUMN SIZE : " + trainDF.columns.size)
+    println("TEST COLUMN SIZE : " + testDF.columns.size)
 
-    val oneHotDFTest = convertCategoricalToOneHotEncoded(testDF)
-    val finalTestDF = prepareForTraining(oneHotDFTest).cache()
+//    val oneHotDFTrain = convertCategoricalToOneHotEncoded(trainDF)
+//    val finalTrainDF = prepareForTraining(trainDF)
+//      .select("SK_ID_CURR", "FEATURES", "label").cache()
 
-    //Initialize model
-    val gbt = new GBTRegressor()
-      .setLabelCol("label")
-      .setFeaturesCol("FEATURES")
-      .setMaxIter(100)
+//    finalTrainDF.printSchema()
+//    finalTrainDF.orderBy("SK_ID_CURR").show(25)
 
-    val paramGrid = new ParamGridBuilder()
-      .build()
+//    val oneHotDFTest = convertCategoricalToOneHotEncoded(testDF)
+    val finalTestDF = prepareForTraining(testDF)
+      .select("SK_ID_CURR", "FEATURES")
+      .cache()
 
-    //Setup cross validator
-    val crossValidation = new CrossValidator()
-      .setEstimator(gbt)
-      .setEvaluator(new RegressionEvaluator())
-      .setEstimatorParamMaps(paramGrid)
-      .setNumFolds(3)
+//    //Initialize model
+//    val gbt = new GBTRegressor()
+//      .setLabelCol("label")
+//      .setFeaturesCol("FEATURES")
+//      .setMaxIter(100)
+//
+//    val paramGrid = new ParamGridBuilder()
+//      .build()
+//
+//    //Setup cross validator
+//    val crossValidation = new CrossValidator()
+//      .setEstimator(gbt)
+//      .setEvaluator(new RegressionEvaluator())
+//      .setEstimatorParamMaps(paramGrid)
+//      .setNumFolds(3)
+//
+//    val model = crossValidation.fit(finalTrainDF)
+//    model.save(FINAL_DATASET_DIR + "gbtModelFinal")
 
-    val model = crossValidation.fit(finalTrainDF)
-    model.save(FINAL_DATASET_DIR + "gbtModel")
+    val modelLoaded = CrossValidatorModel.load(FINAL_DATASET_DIR + "gbtModelFinal")
 
-    val prediction = model.bestModel.transform(finalTestDF)
-    prediction.printSchema()
+    val prediction = modelLoaded.bestModel.transform(finalTestDF)
+    prediction.show(truncate = false)
+    val normalized = prediction
+      .withColumn("prediction", when(prediction("prediction") < 0, 0).otherwise(prediction("prediction")))
 
+    normalized.select(
+      col("SK_ID_CURR"),
+      col("prediction").alias("TARGET")
+    )
+      .orderBy("SK_ID_CURR")
+      .coalesce(1)
+      .write.mode("overwrite")
+      .option("header", "true")
+      .csv(FINAL_DATASET_DIR + "submission")
 
-  }
+      }
 
 }
