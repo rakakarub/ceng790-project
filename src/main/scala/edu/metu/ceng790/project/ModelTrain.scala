@@ -21,14 +21,14 @@ object ModelTrain {
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
 
-//    val trainDF = spark.read.parquet(FINAL_TRAIN_DIR_FINAL)
+    val trainDF = spark.read.parquet(FINAL_TRAIN_DIR_FINAL)
     val testDF = spark.read.parquet(FINAL_TEST_DIR_FINAL)
 
-//    println("TRAIN COLUMN SIZE : " + trainDF.columns.size)
+    println("TRAIN COLUMN SIZE : " + trainDF.columns.size)
     println("TEST COLUMN SIZE : " + testDF.columns.size)
 
 //    val oneHotDFTrain = convertCategoricalToOneHotEncoded(trainDF)
-//    val finalTrainDF = prepareForTraining(trainDF)
+    val finalTrainDF = prepareForTraining(trainDF)
 //      .select("SK_ID_CURR", "FEATURES", "label").cache()
 
 //    finalTrainDF.printSchema()
@@ -39,26 +39,30 @@ object ModelTrain {
       .select("SK_ID_CURR", "FEATURES")
       .cache()
 
-//    //Initialize model
-//    val gbt = new GBTRegressor()
-//      .setLabelCol("label")
-//      .setFeaturesCol("FEATURES")
-//      .setMaxIter(100)
-//
-//    val paramGrid = new ParamGridBuilder()
-//      .build()
-//
-//    //Setup cross validator
-//    val crossValidation = new CrossValidator()
-//      .setEstimator(gbt)
-//      .setEvaluator(new RegressionEvaluator())
-//      .setEstimatorParamMaps(paramGrid)
-//      .setNumFolds(3)
-//
-//    val model = crossValidation.fit(finalTrainDF)
-//    model.save(FINAL_DATASET_DIR + "gbtModelFinal")
+    //Initialize model
+    val gbt = new GBTRegressor()
+      .setLabelCol("label")
+      .setFeaturesCol("FEATURES")
+      .setMaxMemoryInMB(1024)
+      .setSeed(123456)
+      .setMaxIter(100)
 
-    val modelLoaded = CrossValidatorModel.load(FINAL_DATASET_DIR + "gbtModelFinal")
+    val paramGrid = new ParamGridBuilder()
+      .addGrid(gbt.maxDepth, Array(4, 5, 6, 7))
+      .addGrid(gbt.maxBins, Array(16, 32, 48))
+      .build()
+
+    //Setup cross validator
+    val crossValidation = new CrossValidator()
+      .setEstimator(gbt)
+      .setEvaluator(new RegressionEvaluator())
+      .setEstimatorParamMaps(paramGrid)
+      .setNumFolds(3)
+
+    val model = crossValidation.fit(finalTrainDF)
+    model.save(FINAL_DATASET_DIR + "gbtModelEngineered++")
+
+    val modelLoaded = CrossValidatorModel.load(FINAL_DATASET_DIR + "gbtModelEngineered")
 
     val prediction = modelLoaded.bestModel.transform(finalTestDF)
     prediction.show(truncate = false)
@@ -73,7 +77,7 @@ object ModelTrain {
       .coalesce(1)
       .write.mode("overwrite")
       .option("header", "true")
-      .csv(FINAL_DATASET_DIR + "submission")
+      .csv(FINAL_DATASET_DIR + "submission++")
 
       }
 
